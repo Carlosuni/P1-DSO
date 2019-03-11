@@ -25,6 +25,10 @@ static int current = 0;
 /* Variable indicating if the library is initialized (init == 1) or not (init == 0) */
 static int init=0;
 
+/* colas de prioridades */
+struct queue* alta_prioridad;
+struct queue* baja_prioridad;
+
 /* Thread control block for the idle thread */
 static TCB idle;
 static void idle_function(){
@@ -60,6 +64,10 @@ void init_mythreadlib() {
     perror("*** ERROR: getcontext in init_thread_lib");
     exit(5);
   }	
+ 	
+  //inicializo las dos colas de prioridades
+  alta_prioridad = queue_new ();
+  baja_prioridad = queue_new ();
 
   for(i=1; i<N; i++){
     t_state[i].state = FREE;
@@ -98,6 +106,12 @@ int mythread_create (void (*fun_addr)(),int priority)
   t_state[i].tid = i;
   t_state[i].run_env.uc_stack.ss_size = STACKSIZE;
   t_state[i].run_env.uc_stack.ss_flags = 0;
+  if(priority==HIGH_PRIORITY){
+    enqueue(alta_prioridad, &t_state[i]);
+  }
+  if(priority==LOW_PRIORITY){
+    enqueue(baja_prioridad, &t_state[i]); 
+  }
   makecontext(&t_state[i].run_env, fun_addr, 1); 
   return i;
 } /****** End my_thread_create() ******/
@@ -148,14 +162,22 @@ int mythread_gettid(){
 
 /* FIFO para alta prioridad, RR para baja*/
 TCB* scheduler(){
-  int i;
-  for(i=0; i<N; i++){
-    if (t_state[i].state == INIT) {
-        current = i;
-	return &t_state[i];
+  //se rehece extrayendo las prioridades segun el ejercicio como lo indica
+  if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
+    while(queue_empty(alta_prioridad)==0){
+      // coge el de prioridad uno, 
+      TCB *p = dequeue(alta_prioridad);
+      if((*p).state == INIT){
+        current = (*p).tid;
+	      return p;
+      }
     }
+  }else{ //pasamos a los de priodidad baja
+    printf("Planificador apartado 3.1.1\n");
+    //TCB *p = dequeue(baja_prioridad);
   }
-  printf("mythread_free: No thread in the system\nExiting...\n");	
+  printf("*** FINISH\n");
+  //printf("mythread_free: No thread in the system\nExiting...\n");	
   exit(1); 
 }
 
@@ -167,6 +189,8 @@ void timer_interrupt(int sig)
 
 /* Activator */
 void activator(TCB* next){
+  //reliza el cambio de contexto y lo ejecuta 
+  printf("*** THREAD %d READY\n", next->tid);
   setcontext (&(next->run_env));
   printf("mythread_free: After setcontext, should never get here!!...\n");	
 }
