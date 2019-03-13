@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "mythread.h": "c",
+        "queue.h": "c"
+    }
+}

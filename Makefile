@@ -33,3 +33,29 @@ $(PRGS): % : %.o
 clean:
 	-rm -f *.o *.a *~ $(PRGS)
 
+
+rrf: interrupt.o
+	ar -rv libinterrupt.a interrupt.o
+	gcc -g -Wall  -I.  -c main.c  -o main.o -lm -lrt
+	gcc -g -Wall  -I.  -c RRF.c  -o mythreadlib.o -lm -lrt
+	gcc -g -Wall  -I.  -c queue.c  -o queue.o -lm -lrt
+	gcc -g -Wall  -I.  -o main main.o mythreadlib.o queue.o  libinterrupt.a -lm -lrt
+
+
+rr: interrupt.o
+	ar -rv libinterrupt.a interrupt.o
+	gcc -g -Wall  -I.  -c main.c  -o main.o -lm -lrt
+	gcc -g -Wall  -I.  -c RR.c  -o mythreadlib.o -lm -lrt
+	gcc -g -Wall  -I.  -c queue.c  -o queue.o -lm -lrt
+	gcc -g -Wall  -I.  -o main main.o mythreadlib.o queue.o  libinterrupt.a -lm -lrt
+
+
+rrfd: interrupt.o
+	ar -rv libinterrupt.a interrupt.o
+	gcc -g -Wall  -I.  -c main.c  -o main.o -lm -lrt
+	gcc -g -Wall  -I.  -c RRFD.c  -o mythreadlib.o -lm -lrt
+	gcc -g -Wall  -I.  -c queue.c  -o queue.o -lm -lrt
+	gcc -g -Wall  -I.  -o main main.o mythreadlib.o queue.o  libinterrupt.a -lm -lrt
+
+	
+
