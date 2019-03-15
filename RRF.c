@@ -173,11 +173,19 @@ TCB* scheduler(){
       }
     }
   }else{ //pasamos a los de priodidad baja
-    printf("Planificador apartado 3.1.1\n");
-    //TCB *p = dequeue(baja_prioridad);
+    //printf("Planificador apartado 3.1.1\n");
+    /*Disable interruptions to dequeue*/
+    //disable_interrupt();
+    /* Establish the next thread as the dequeued element from ReadyQueue */
+    TCB* next = dequeue(baja_prioridad);
+    /*Enable the interruptions*/
+    //enable_interrupt();
+    if((*next).state == INIT){
+      current = (*next).tid;
+      return next;
+    }
   }
   printf("*** FINISH\n");
-  //printf("mythread_free: No thread in the system\nExiting...\n");	
   exit(1); 
 }
 
@@ -185,14 +193,39 @@ TCB* scheduler(){
 /* Timer interrupt  */
 void timer_interrupt(int sig)
 {
+  if(running->priority == LOW_PRIORITY){
+    running->ticks = (running->ticks) - 1;
+    if (running->ticks <= 0){
+      TCB *next = scheduler();
+      activator(next);
+    }
+  }
 } 
 
 /* Activator */
 void activator(TCB* next){
   //reliza el cambio de contexto y lo ejecuta 
   printf("*** THREAD %d READY\n", next->tid);
-  setcontext (&(next->run_env));
-  printf("mythread_free: After setcontext, should never get here!!...\n");	
+    /*Establish  thread ticks to default (QUANTUM_TICKS)*/
+  running->ticks= QUANTUM_TICKS;
+
+  /* Save the exiting thread progress*/
+  TCB* previous_tcb = running;
+  /* Establish the new dequeued thread (next) as the running one*/
+  running = next;
+
+  current = running->tid;
+
+  if(running->priority== HIGH_PRIORITY){
+    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", previous_tcb->tid, running->tid);
+    setcontext(&(running->run_env));
+  }
+  if(running->priority== LOW_PRIORITY){
+    printf("*** SWAPCONTEXT FROM %d TO %d\n", current, next->tid);
+    enqueue(baja_prioridad, running);
+    swapcontext(&previous_tcb->run_env, &running->run_env);
+    setcontext (&(running->run_env));
+  }	
 }
 
 
