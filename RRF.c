@@ -106,13 +106,25 @@ int mythread_create (void (*fun_addr)(),int priority)
   t_state[i].tid = i;
   t_state[i].run_env.uc_stack.ss_size = STACKSIZE;
   t_state[i].run_env.uc_stack.ss_flags = 0;
+  makecontext(&t_state[i].run_env, fun_addr, 1); 
+
+  TCB *actual = &t_state[i];
+
   if(priority==HIGH_PRIORITY){
-    enqueue(alta_prioridad, &t_state[i]);
+    if (queue_empty(alta_prioridad) == 1 && running->priority < 1){ /* o igual a 0¿?*/
+      activator(actual);
+      /*********Without Eject, just enqueue in High************/
+    }else{
+      disable_interrupt();
+      enqueue(alta_prioridad, &t_state[i]);
+      enable_interrupt();
+    }
   }
   if(priority==LOW_PRIORITY){
+    disable_interrupt();
     enqueue(baja_prioridad, &t_state[i]); 
+    enable_interrupt();
   }
-  makecontext(&t_state[i].run_env, fun_addr, 1); 
   return i;
 } /****** End my_thread_create() ******/
 
@@ -164,26 +176,19 @@ int mythread_gettid(){
 TCB* scheduler(){
   //se rehece extrayendo las prioridades segun el ejercicio como lo indica
   if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
-    while(queue_empty(alta_prioridad)==0){
-      // coge el de prioridad uno, 
-      TCB *p = dequeue(alta_prioridad);
-      if((*p).state == INIT){
-        current = (*p).tid;
-	      return p;
-      }
-    }
+    // coge el de prioridad uno, 
+    disable_interrupt();
+    TCB *p = dequeue(alta_prioridad);
+    enable_interrupt();
+	  return p;
   }else{ //pasamos a los de priodidad baja
-    //printf("Planificador apartado 3.1.1\n");
-    /*Disable interruptions to dequeue*/
-    //disable_interrupt();
-    /* Establish the next thread as the dequeued element from ReadyQueue */
-    TCB* next = dequeue(baja_prioridad);
-    /*Enable the interruptions*/
-    //enable_interrupt();
-    if((*next).state == INIT){
-      current = (*next).tid;
-      return next;
-    }
+    disable_interrupt();
+    TCB* p = dequeue(baja_prioridad);
+    enable_interrupt();
+    return p;
+  }
+  if (running->state==INIT){
+    return running;
   }
   printf("*** FINISH\n");
   exit(1); 
@@ -193,39 +198,53 @@ TCB* scheduler(){
 /* Timer interrupt  */
 void timer_interrupt(int sig)
 {
-  if(running->priority == LOW_PRIORITY){
-    running->ticks = (running->ticks) - 1;
-    if (running->ticks <= 0){
-      TCB *next = scheduler();
-      activator(next);
-    }
+  if (running->priority >= 1){
+    return;
+  }
+  running->ticks = (running->ticks) - 1;
+
+  if (running->ticks <= 0){
+    TCB *next = scheduler();
+    activator(next);
   }
 } 
 
 /* Activator */
 void activator(TCB* next){
-  //reliza el cambio de contexto y lo ejecuta 
-  printf("*** THREAD %d READY\n", next->tid);
-    /*Establish  thread ticks to default (QUANTUM_TICKS)*/
+  	/*Establish  thread ticks to default (QUANTUM_TICKS)*/
   running->ticks= QUANTUM_TICKS;
 
+  /*Check the next thread to run if it's the same, don't do nothing*/
+  if (running == next){
+    return;
+  }
+
   /* Save the exiting thread progress*/
-  TCB* previous_tcb = running;
+  TCB* anterior = running;
   /* Establish the new dequeued thread (next) as the running one*/
   running = next;
 
   current = running->tid;
 
-  if(running->priority== HIGH_PRIORITY){
-    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", previous_tcb->tid, running->tid);
-    setcontext(&(running->run_env));
+  /*If the current thread state is finished >> set the new thread context*/
+  if (anterior->state == FREE){
+    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", anterior->tid, running->tid);
+    setcontext (&(next->run_env));
   }
-  if(running->priority== LOW_PRIORITY){
-    printf("*** SWAPCONTEXT FROM %d TO %d\n", current, next->tid);
-    enqueue(baja_prioridad, running);
-    swapcontext(&previous_tcb->run_env, &running->run_env);
-    setcontext (&(running->run_env));
-  }	
+  disable_interrupt();
+  /* Enqueue the previous thread to complete its execution later*/
+  enqueue(baja_prioridad, anterior);
+  enable_interrupt();
+
+  /*****Just check if the thread was ejected or he just finish her quantum */
+  /*If they was ejected*/
+  if (running->priority >= 1){
+    printf("*** THREAD %d PREEMTED: SET CONTEXT OF %d\n", anterior->tid, running->tid);
+  } else {
+    /*Effectuate the context swap*/ 
+  printf("*** SWAPCONTEXT FROM %d TO %d\n", anterior->tid,running->tid);
+  }
+  swapcontext(&anterior->run_env, &running->run_env);
 }
 
 
