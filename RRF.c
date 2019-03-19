@@ -113,7 +113,6 @@ int mythread_create (void (*fun_addr)(),int priority)
   if(priority==HIGH_PRIORITY){
     if (queue_empty(alta_prioridad) == 1 && running->priority < 1){ /* o igual a 0¿?*/
       activator(actual);
-      /*********Without Eject, just enqueue in High************/
     }else{
       disable_interrupt();
       enqueue(alta_prioridad, &t_state[i]);
