@@ -18,9 +18,9 @@ void disk_interrupt(int sig);
 /* Array of state thread control blocks: the process allows a maximum of N threads */
 static TCB t_state[N]; 
 
-/* Current running thread */
-static TCB* running;
-static int current = 0;
+/* actual en_ejecucion thread */
+static TCB* en_ejecucion;
+static int actual = 0;
 
 /* Variable indicating if the library is initialized (init == 1) or not (init == 0) */
 static int init=0;
@@ -74,7 +74,7 @@ void init_mythreadlib() {
   }
  
   t_state[0].tid = 0;
-  running = &t_state[0];
+  en_ejecucion = &t_state[0];
 
   /* Initialize disk and clock interrupts */
   init_disk_interrupt();
@@ -111,7 +111,7 @@ int mythread_create (void (*fun_addr)(),int priority)
   TCB *actual = &t_state[i];
 
   if(priority==HIGH_PRIORITY){
-    if (queue_empty(alta_prioridad) == 1 && running->priority < 1){ /* o igual a 0¿?*/
+    if (queue_empty(alta_prioridad) == 1 && en_ejecucion->priority == LOW_PRIORITY){ /* o igual a 0¿?*/
       activator(actual);
     }else{
       disable_interrupt();
@@ -142,13 +142,13 @@ void disk_interrupt(int sig)
 /* Free terminated thread and exits */
 void mythread_exit() {
   int tid = mythread_gettid();	
-
-  printf("*** THREAD %d FINISHED\n", tid);	
+  printf("*** THREAD %d FINISHED\n", tid);
+  //preparamos el thread a ejecutar
+  TCB* siguiente = scheduler();	
   t_state[tid].state = FREE;
-  free(t_state[tid].run_env.uc_stack.ss_sp); 
-
-  TCB* next = scheduler();
-  activator(next);
+  free(t_state[tid].run_env.uc_stack.ss_sp);
+  //lanzamos la ejecucion 
+  activator(siguiente);
 }
 
 /* Sets the priority of the calling thread */
@@ -164,10 +164,10 @@ int mythread_getpriority(int priority) {
 }
 
 
-/* Get the current thread id.  */
+/* Get the actual thread id.  */
 int mythread_gettid(){
   if (!init) { init_mythreadlib(); init=1;}
-  return current;
+  return actual;
 }
 
 
@@ -175,19 +175,19 @@ int mythread_gettid(){
 TCB* scheduler(){
   //se rehece extrayendo las prioridades segun el ejercicio como lo indica
   if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
-    // coge el de prioridad uno, 
+    // coge el de prioridad uno
     disable_interrupt();
     TCB *p = dequeue(alta_prioridad);
     enable_interrupt();
 	  return p;
-  }else{ //pasamos a los de priodidad baja
+  }else{ //pasamos a los de priodidad baja cuando ya no quedan en la de alta prioridad
     disable_interrupt();
     TCB* p = dequeue(baja_prioridad);
     enable_interrupt();
     return p;
   }
-  if (running->state==INIT){
-    return running;
+  if (en_ejecucion->state==INIT){
+    return en_ejecucion;
   }
   printf("*** FINISH\n");
   exit(1); 
@@ -197,53 +197,46 @@ TCB* scheduler(){
 /* Timer interrupt  */
 void timer_interrupt(int sig)
 {
-  if (running->priority >= 1){
+  if (en_ejecucion->priority == HIGH_PRIORITY){
     return;
   }
-  running->ticks = (running->ticks) - 1;
-
-  if (running->ticks <= 0){
-    TCB *next = scheduler();
-    activator(next);
+  en_ejecucion->ticks = (en_ejecucion->ticks) - 1;
+  if (en_ejecucion->ticks <= 0){
+    TCB *siguiente = scheduler();
+    activator(siguiente);
   }
 } 
 
 /* Activator */
-void activator(TCB* next){
-  	/*Establish  thread ticks to default (QUANTUM_TICKS)*/
-  running->ticks= QUANTUM_TICKS;
-
-  /*Check the next thread to run if it's the same, don't do nothing*/
-  if (running == next){
+void activator(TCB* siguiente){
+  en_ejecucion->ticks= QUANTUM_TICKS;
+  // se le ponen los ticks por defecto para optimizar el programa
+  if (en_ejecucion == siguiente){
+    // se devuelve NULL si el que esta en ejecucion es el que se ejecutara a continuacion
     return;
   }
+  TCB* anterior = en_ejecucion;
+  en_ejecucion = siguiente;
+  actual = en_ejecucion->tid;
 
-  /* Save the exiting thread progress*/
-  TCB* anterior = running;
-  /* Establish the new dequeued thread (next) as the running one*/
-  running = next;
 
-  current = running->tid;
-
-  /*If the current thread state is finished >> set the new thread context*/
   if (anterior->state == FREE){
-    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", anterior->tid, running->tid);
-    setcontext (&(next->run_env));
+    //solo se ejecuta cuando se produce un cambio de contexto
+    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", anterior->tid, en_ejecucion->tid);
+    setcontext (&(siguiente->run_env));
   }
   disable_interrupt();
-  /* Enqueue the previous thread to complete its execution later*/
   enqueue(baja_prioridad, anterior);
   enable_interrupt();
 
   /*****Just check if the thread was ejected or he just finish her quantum */
   /*If they was ejected*/
-  if (running->priority >= 1){
-    printf("*** THREAD %d PREEMTED: SET CONTEXT OF %d\n", anterior->tid, running->tid);
+  if (en_ejecucion->priority == HIGH_PRIORITY){
+    printf("*** THREAD %d PREEMTED: SET CONTEXT OF %d\n", anterior->tid, en_ejecucion->tid);
   } else {
-    /*Effectuate the context swap*/ 
-  printf("*** SWAPCONTEXT FROM %d TO %d\n", anterior->tid,running->tid);
+    printf("*** SWAPCONTEXT FROM %d TO %d\n", anterior->tid,en_ejecucion->tid);
   }
-  swapcontext(&anterior->run_env, &running->run_env);
+  swapcontext(&anterior->run_env, &en_ejecucion->run_env);
 }
 
 

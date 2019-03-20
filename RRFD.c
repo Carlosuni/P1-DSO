@@ -25,11 +25,18 @@ static int current = 0;
 /* Variable indicating if the library is initialized (init == 1) or not (init == 0) */
 static int init=0;
 
+/* colas de prioridades */
+struct queue* alta_prioridad;
+struct queue* baja_prioridad;
+struct queue* waitnet_Queue;
+
 /* Thread control block for the idle thread */
 static TCB idle;
 static void idle_function(){
   while(1);
 }
+
+
 
 /* Initialize the thread library */
 void init_mythreadlib() {
@@ -60,7 +67,12 @@ void init_mythreadlib() {
     perror("*** ERROR: getcontext in init_thread_lib");
     exit(5);
   }	
-
+ 	
+  //inicializo las dos colas de prioridades
+  alta_prioridad = queue_new ();
+  baja_prioridad = queue_new ();
+  waitnet_Queue = queue_new ();
+  
   for(i=1; i<N; i++){
     t_state[i].state = FREE;
   }
@@ -98,6 +110,12 @@ int mythread_create (void (*fun_addr)(),int priority)
   t_state[i].tid = i;
   t_state[i].run_env.uc_stack.ss_size = STACKSIZE;
   t_state[i].run_env.uc_stack.ss_flags = 0;
+  if(priority==HIGH_PRIORITY){
+    enqueue(alta_prioridad, &t_state[i]);
+  }
+  if(priority==LOW_PRIORITY){
+    enqueue(baja_prioridad, &t_state[i]); 
+  }
   makecontext(&t_state[i].run_env, fun_addr, 1); 
   return i;
 } /****** End my_thread_create() ******/
@@ -105,12 +123,59 @@ int mythread_create (void (*fun_addr)(),int priority)
 /* Read disk syscall */
 int read_disk()
 {
-   return 1;
+  if(data_in_page_cache()==0){
+    printf("*LOS DATOS SOLICITADOS YA ESTAN EN LA CACHE DE PAGINAs*\n");
+    return 1;
+  }
+  int t_id = mythread_gettid(); 
+  printf("*** THREAD %d READ FROM DISK\n", t_id);
+
+  TCB* t = &t_state[t_id];
+  t_state[t_id].state = WAITING;
+
+  disable_interrupt();
+  disable_disk_interrupt();
+  enqueue(waitnet_Queue, t);
+  enable_interrupt();
+  enable_disk_interrupt();
+
+  TCB* next = scheduler();
+  activator(next);
+
+  return 1;
 }
 
+/*if the requested data is not already in the page cache*/
+/*int data_in_page_cache(){
+  return 1;
+}
+*/
 /* Disk interrupt  */
 void disk_interrupt(int sig)
 {
+
+  if(queue_empty(waitnet_Queue) == 0){
+    
+    int t_id; 
+    
+    disable_interrupt();
+    disable_disk_interrupt();
+    TCB* t = dequeue(waitnet_Queue);
+
+    t_id = t->tid;
+    t->state = INIT;
+    printf("*** THREAD %d READY\n", t_id);
+
+    if(t->priority >= 1){
+      enqueue(alta_prioridad, t);
+    } else {
+      enqueue(baja_prioridad, t);
+    }
+
+    enable_interrupt();
+    enable_disk_interrupt();
+
+  }
 } 
 
 
@@ -146,16 +211,24 @@ int mythread_gettid(){
 }
 
 
-/* FIFO para alta prioridad, RR para baja con cambio de contexto voluntario*/
+/* FIFO para alta prioridad, RR para baja*/
 TCB* scheduler(){
-  int i;
-  for(i=0; i<N; i++){
-    if (t_state[i].state == INIT) {
-        current = i;
-	return &t_state[i];
+  //se rehece extrayendo las prioridades segun el ejercicio como lo indica
+  if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
+    while(queue_empty(alta_prioridad)==0){
+      // coge el de prioridad uno, 
+      TCB *p = dequeue(alta_prioridad);
+      if((*p).state == INIT){
+        current = (*p).tid;
+	      return p;
+      }
     }
+  }else{ //pasamos a los de priodidad baja
+    printf("Planificador apartado 3.1.1\n");
+    //TCB *p = dequeue(baja_prioridad);
   }
-  printf("mythread_free: No thread in the system\nExiting...\n");	
+  printf("*** FINISH\n");
+  //printf("mythread_free: No thread in the system\nExiting...\n");	
   exit(1); 
 }
 
@@ -163,10 +236,13 @@ TCB* scheduler(){
 /* Timer interrupt  */
 void timer_interrupt(int sig)
 {
+
 } 
 
 /* Activator */
 void activator(TCB* next){
+  //reliza el cambio de contexto y lo ejecuta 
+  printf("*** THREAD %d READY\n", next->tid);
   setcontext (&(next->run_env));
   printf("mythread_free: After setcontext, should never get here!!...\n");	
 }

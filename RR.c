@@ -16,7 +16,7 @@ void timer_interrupt(int sig);
 void disk_interrupt(int sig);
 
 /* Cola de threads preparados*/ 
-struct queue *ready_queue;
+struct queue *listos;
 
 /* Array of state thread control blocks: the process allows a maximum of N threads */
 static TCB t_state[N]; 
@@ -72,7 +72,7 @@ void init_mythreadlib() {
   running = &t_state[0];
 
   /* Inicializa la cola de threads preparados*/
-  ready_queue = queue_new();
+  listos = queue_new();
 
   /* Initialize disk and clock interrupts */
   init_disk_interrupt();
@@ -108,7 +108,7 @@ int mythread_create (void (*fun_addr)(),int priority)
 
   /*Añadimos el thread a la cola de preparados*/
   TCB *state = &t_state[i];
-  enqueue(ready_queue, state);
+  enqueue(listos, state);
 
   return i;
 } /****** End my_thread_create() ******/
@@ -159,24 +159,17 @@ int mythread_gettid(){
 
 /* RoundRobin separado en ticks de tiempo (rodajas)*/
 TCB* scheduler(){
-/*Check if the queue is empty (1) or not (0), if not empty we continue*/
- if (queue_empty(ready_queue)==0){
-  /*Disable interruptions to dequeue*/
+ if (queue_empty(listos)==0){
   disable_interrupt();
-  /* Establish the next thread as the dequeued element from ReadyQueue */
-  TCB* next = dequeue(ready_queue);
-  /*Enable the interruptions*/
+  TCB* next = dequeue(listos);
   enable_interrupt();
 
   return next;
  }
-/* If the queue is empty we check if the running tcb doesn´t finished its execution*/
  if (running->state==INIT){
-  /*execute the tcb if not completed*/
   return running;
  }
 
-/* At this point, no threads stills in system...*/
   printf("*** FINISH\n"); 
   exit(1); 
 }
@@ -187,35 +180,28 @@ void timer_interrupt(int sig)
 {
   running->ticks = (running->ticks) - 1;
 
-if (running->ticks <= 0){
-  TCB *next = scheduler();
-  activator(next);
-}
+  if (running->ticks <= 0){
+    TCB *next = scheduler();
+    activator(next);
+  }
 } 
 
 /* Activator */
 void activator(TCB* next){
-  /*Establish  thread ticks to default (QUANTUM_TICKS)*/
+
   running->ticks= QUANTUM_TICKS;
-
-  /* Save the exiting thread progress*/
   TCB* previous_tcb = running;
-  /* Establish the new dequeued thread (next) as the running one*/
   running = next;
-
   current = running->tid;
 
-  /*If the current thread state is finished >> set the new thread context*/
   if (previous_tcb->state == FREE){
     printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", previous_tcb->tid, running->tid);
     setcontext (&(next->run_env));
   }
   disable_interrupt();
-  /* Enqueue the previous thread to complete its execution later*/
-  enqueue(ready_queue, previous_tcb);
+  enqueue(listos, previous_tcb);
   enable_interrupt();
 
-  /*Effectuate the context swap*/ 
   printf("*** SWAPCONTEXT FROM %d TO %d\n", previous_tcb->tid,running->tid);
   swapcontext(&previous_tcb->run_env, &running->run_env);
 }
