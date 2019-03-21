@@ -28,7 +28,7 @@ static int init=0;
 /* colas de prioridades */
 struct queue* alta_prioridad;
 struct queue* baja_prioridad;
-struct queue* waitnet_Queue;
+struct queue* cola_de_espera;
 
 /* Thread control block for the idle thread */
 static TCB idle;
@@ -71,7 +71,7 @@ void init_mythreadlib() {
   //inicializo las dos colas de prioridades
   alta_prioridad = queue_new ();
   baja_prioridad = queue_new ();
-  waitnet_Queue = queue_new ();
+  cola_de_espera = queue_new ();
   
   for(i=1; i<N; i++){
     t_state[i].state = FREE;
@@ -124,7 +124,7 @@ int mythread_create (void (*fun_addr)(),int priority)
 int read_disk()
 {
   if(data_in_page_cache()==0){
-    printf("*LOS DATOS SOLICITADOS YA ESTAN EN LA CACHE DE PAGINAs*\n");
+    //printf("*LOS DATOS SOLICITADOS YA ESTAN EN LA CACHE DE PAGINAs*\n");
     return 1;
   }
   int t_id = mythread_gettid(); 
@@ -135,7 +135,7 @@ int read_disk()
 
   disable_interrupt();
   disable_disk_interrupt();
-  enqueue(waitnet_Queue, t);
+  enqueue(cola_de_espera, t);
   enable_interrupt();
   enable_disk_interrupt();
 
@@ -154,24 +154,25 @@ int read_disk()
 void disk_interrupt(int sig)
 {
 
-  if(queue_empty(waitnet_Queue) == 0){
+  if(queue_empty(cola_de_espera) == 0){
     
     int t_id; 
     
     disable_interrupt();
     disable_disk_interrupt();
-    TCB* t = dequeue(waitnet_Queue);
+    TCB* t = dequeue(cola_de_espera);
 
     t_id = t->tid;
     t->state = INIT;
     printf("*** THREAD %d READY\n", t_id);
 
-    if(t->priority >= 1){
+    if(t->priority >= HIGH_PRIORITY){
       enqueue(alta_prioridad, t);
     } else {
       enqueue(baja_prioridad, t);
     }
 
+    activator(scheduler());
     enable_interrupt();
     enable_disk_interrupt();
 
@@ -213,38 +214,64 @@ int mythread_gettid(){
 
 /* FIFO para alta prioridad, RR para baja*/
 TCB* scheduler(){
-  //se rehece extrayendo las prioridades segun el ejercicio como lo indica
+//se rehece extrayendo las prioridades segun el ejercicio como lo indica
   if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
-    while(queue_empty(alta_prioridad)==0){
-      // coge el de prioridad uno, 
-      TCB *p = dequeue(alta_prioridad);
-      if((*p).state == INIT){
-        current = (*p).tid;
-	      return p;
-      }
-    }
-  }else{ //pasamos a los de priodidad baja
-    printf("Planificador apartado 3.1.1\n");
-    //TCB *p = dequeue(baja_prioridad);
+    // coge el de prioridad uno
+    disable_interrupt();
+    TCB *p = dequeue(alta_prioridad);
+    enable_interrupt();
+	  return p;
+  }
+  //pasamos a los de priodidad baja cuando ya no quedan en la de alta prioridad
+  if (queue_empty(baja_prioridad)==0){
+    disable_interrupt();
+    TCB* p = dequeue(baja_prioridad);
+    enable_interrupt();
+    return p;
+  }
+  if (running->state==INIT){
+    return running;
   }
   printf("*** FINISH\n");
-  //printf("mythread_free: No thread in the system\nExiting...\n");	
-  exit(1); 
+  exit(1);  
 }
 
 
 /* Timer interrupt  */
 void timer_interrupt(int sig)
 {
-
 } 
 
 /* Activator */
 void activator(TCB* next){
-  //reliza el cambio de contexto y lo ejecuta 
-  printf("*** THREAD %d READY\n", next->tid);
-  setcontext (&(next->run_env));
-  printf("mythread_free: After setcontext, should never get here!!...\n");	
+  running->ticks= QUANTUM_TICKS;
+  // se le ponen los ticks por defecto para optimizar el programa
+  if (running == next){
+    // se devuelve NULL si el que esta en ejecucion es el que se ejecutara a continuacion
+    return;
+  }
+  TCB* anterior = running;
+  running = next;
+  current = running->tid;
+
+
+  if (anterior->state == FREE){
+    //solo se ejecuta cuando se produce un cambio de contexto
+    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", anterior->tid, running->tid);
+    setcontext (&(next->run_env));
+  }
+  disable_interrupt();
+  enqueue(baja_prioridad, anterior);
+  enable_interrupt();
+
+  /*****Just check if the thread was ejected or he just finish her quantum */
+  /*If they was ejected*/
+  if (running->priority == HIGH_PRIORITY){
+    printf("*** THREAD %d PREEMTED: SET CONTEXT OF %d\n", anterior->tid, running->tid);
+  } else {
+    printf("*** SWAPCONTEXT FROM %d TO %d\n", anterior->tid,running->tid);
+  }
+  swapcontext(&anterior->run_env, &running->run_env);
 }
 
 
