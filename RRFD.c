@@ -140,7 +140,6 @@ int mythread_create (void (*fun_addr)(),int priority)
 /* Read disk syscall */
 int read_disk()
 {
-  // REVISAR
   int t_id = mythread_gettid(); 
   printf("*** THREAD %d READ FROM DISK\n", t_id);
 
@@ -162,7 +161,6 @@ int read_disk()
 /* Disk interrupt  */
 void disk_interrupt(int sig)
 {
-  // REVISAR
   if(queue_empty(espera_disco) == 0){    
     int thread_id; 
     
@@ -246,7 +244,6 @@ TCB* scheduler(){
     return en_ejecucion;
   }
 
-  // REVISAR
   if(queue_empty(espera_disco)){
       printf("*** FINISH\n"); 
       exit(1); 
@@ -288,7 +285,6 @@ void activator(TCB* siguiente){
     setcontext (&(siguiente->run_env));
   }
 
-  // REVISAR
   if (anterior->state == WAITING){
     if(en_ejecucion->state != IDLE)
       printf("*** THREAD READY : SET CONTEXT TO %d\n", en_ejecucion->tid);
@@ -304,8 +300,7 @@ void activator(TCB* siguiente){
   enable_interrupt();
   enable_disk_interrupt();
 
-  /*****Just check if the thread was ejected or he just finish her quantum */
-  /*If they was ejected*/
+  /*Comprueba si el hilo fue liberado o si acaba su rodaja*/
   if(anterior->state ==IDLE){
     printf("*** THREAD READY : SET CONTEXT TO %d\n", en_ejecucion->tid);
   } else {
@@ -314,8 +309,10 @@ void activator(TCB* siguiente){
     } else {
       printf("*** SWAPCONTEXT FROM %d TO %d\n", anterior->tid,en_ejecucion->tid);
     }
-    swapcontext(&anterior->run_env, &en_ejecucion->run_env);
   }
+  
+  swapcontext(&anterior->run_env, &en_ejecucion->run_env);
+
 }
 
 
