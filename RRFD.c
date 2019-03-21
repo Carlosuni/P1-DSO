@@ -140,17 +140,22 @@ int mythread_create (void (*fun_addr)(),int priority)
 /* Read disk syscall */
 int read_disk()
 {
-  int t_id = mythread_gettid(); 
-  printf("*** THREAD %d READ FROM DISK\n", t_id);
 
-  TCB* actual = &t_state[t_id];
-  t_state[t_id].state = WAITING;
+  // Comprueba si ya está en la caché de páginas
+  if (data_in_page_cache() == 0) {
+    int t_id = mythread_gettid(); 
+    printf("*** THREAD %d READ FROM DISK\n", t_id);
 
-  disable_interrupt();
-  disable_disk_interrupt();
-  enqueue(espera_disco, actual);
-  enable_interrupt();
-  enable_disk_interrupt();
+
+    TCB* actual = &t_state[t_id];
+    t_state[t_id].state = WAITING;
+
+    disable_interrupt();
+    disable_disk_interrupt();
+    enqueue(espera_disco, actual);
+    enable_interrupt();
+    enable_disk_interrupt();
+  }
 
   TCB* next = scheduler();
   activator(next);
@@ -221,7 +226,7 @@ int mythread_gettid(){
 TCB* scheduler(){
   //se rehece extrayendo las prioridades segun el ejercicio como lo indica
   if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
-    // coge el de prioridad uno
+    // coge el de prioridad alta
     disable_interrupt();
     disable_disk_interrupt();
     TCB *p = dequeue(alta_prioridad);
