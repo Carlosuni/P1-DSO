@@ -18,25 +18,26 @@ void disk_interrupt(int sig);
 /* Array of state thread control blocks: the process allows a maximum of N threads */
 static TCB t_state[N]; 
 
-/* Current running thread */
-static TCB* running;
-static int current = 0;
+/* actual en_ejecucion thread */
+static TCB* en_ejecucion;
+static int actual = 0;
 
 /* Variable indicating if the library is initialized (init == 1) or not (init == 0) */
 static int init=0;
 
-/* colas de prioridades */
+/* colas de prioridades y lecturas pendientes de disco*/
 struct queue* alta_prioridad;
 struct queue* baja_prioridad;
-struct queue* waitnet_Queue;
+struct queue* espera_disco;
+
+
+
 
 /* Thread control block for the idle thread */
 static TCB idle;
 static void idle_function(){
   while(1);
 }
-
-
 
 /* Initialize the thread library */
 void init_mythreadlib() {
@@ -68,17 +69,18 @@ void init_mythreadlib() {
     exit(5);
   }	
  	
-  //inicializo las dos colas de prioridades
+  //inicializo las dos colas de prioridades y esperas de lectura en disco
   alta_prioridad = queue_new ();
   baja_prioridad = queue_new ();
-  waitnet_Queue = queue_new ();
-  
+  espera_disco = queue_new ();
+
+
   for(i=1; i<N; i++){
     t_state[i].state = FREE;
   }
  
   t_state[0].tid = 0;
-  running = &t_state[0];
+  en_ejecucion = &t_state[0];
 
   /* Initialize disk and clock interrupts */
   init_disk_interrupt();
@@ -108,34 +110,46 @@ int mythread_create (void (*fun_addr)(),int priority)
     exit(-1);
   }
   t_state[i].tid = i;
+  t_state[i].ticks = QUANTUM_TICKS;
   t_state[i].run_env.uc_stack.ss_size = STACKSIZE;
   t_state[i].run_env.uc_stack.ss_flags = 0;
-  if(priority==HIGH_PRIORITY){
-    enqueue(alta_prioridad, &t_state[i]);
-  }
-  if(priority==LOW_PRIORITY){
-    enqueue(baja_prioridad, &t_state[i]); 
-  }
   makecontext(&t_state[i].run_env, fun_addr, 1); 
+
+  TCB *actual = &t_state[i];
+
+  if(t_state[i].priority==HIGH_PRIORITY){    
+    if (queue_empty(alta_prioridad) == 1 && en_ejecucion->priority == LOW_PRIORITY){ /* o igual a 0¿?*/
+      activator(actual);
+    }else{
+      disable_interrupt();
+      disable_disk_interrupt();
+      enqueue(alta_prioridad, actual);
+      enable_interrupt();
+      enable_disk_interrupt();
+    }
+  }else {
+    disable_interrupt();
+    disable_disk_interrupt();
+    enqueue(baja_prioridad, &t_state[i]); 
+    enable_interrupt();
+    enable_disk_interrupt();
+  }
   return i;
 } /****** End my_thread_create() ******/
 
 /* Read disk syscall */
 int read_disk()
 {
-  if(data_in_page_cache()==0){
-    printf("*LOS DATOS SOLICITADOS YA ESTAN EN LA CACHE DE PAGINAs*\n");
-    return 1;
-  }
+  // REVISAR
   int t_id = mythread_gettid(); 
   printf("*** THREAD %d READ FROM DISK\n", t_id);
 
-  TCB* t = &t_state[t_id];
+  TCB* actual = &t_state[t_id];
   t_state[t_id].state = WAITING;
 
   disable_interrupt();
   disable_disk_interrupt();
-  enqueue(waitnet_Queue, t);
+  enqueue(espera_disco, actual);
   enable_interrupt();
   enable_disk_interrupt();
 
@@ -145,26 +159,20 @@ int read_disk()
   return 1;
 }
 
-/*if the requested data is not already in the page cache*/
-/*int data_in_page_cache(){
-  return 1;
-}
-*/
 /* Disk interrupt  */
 void disk_interrupt(int sig)
 {
-
-  if(queue_empty(waitnet_Queue) == 0){
-    
-    int t_id; 
+  // REVISAR
+  if(queue_empty(espera_disco) == 0){    
+    int thread_id; 
     
     disable_interrupt();
     disable_disk_interrupt();
-    TCB* t = dequeue(waitnet_Queue);
+    TCB* t = dequeue(espera_disco);
 
-    t_id = t->tid;
+    thread_id = t->tid;
     t->state = INIT;
-    printf("*** THREAD %d READY\n", t_id);
+    printf("*** THREAD %d READY\n", thread_id);
 
     if(t->priority >= 1){
       enqueue(alta_prioridad, t);
@@ -175,20 +183,20 @@ void disk_interrupt(int sig)
     enable_interrupt();
     enable_disk_interrupt();
 
-  }
+  }  
 } 
 
 
 /* Free terminated thread and exits */
 void mythread_exit() {
   int tid = mythread_gettid();	
-
-  printf("*** THREAD %d FINISHED\n", tid);	
+  printf("*** THREAD %d FINISHED\n", tid);
+  //preparamos el thread a ejecutar
+  TCB* siguiente = scheduler();	
   t_state[tid].state = FREE;
-  free(t_state[tid].run_env.uc_stack.ss_sp); 
-
-  TCB* next = scheduler();
-  activator(next);
+  free(t_state[tid].run_env.uc_stack.ss_sp);
+  //lanzamos la ejecucion 
+  activator(siguiente);
 }
 
 /* Sets the priority of the calling thread */
@@ -204,47 +212,110 @@ int mythread_getpriority(int priority) {
 }
 
 
-/* Get the current thread id.  */
+/* Get the actual thread id.  */
 int mythread_gettid(){
   if (!init) { init_mythreadlib(); init=1;}
-  return current;
+  return actual;
 }
 
 
-/* FIFO para alta prioridad, RR para baja*/
+/* FIFO para alta prioridad, RR para baja, con cambio de contexto voluntario*/
 TCB* scheduler(){
   //se rehece extrayendo las prioridades segun el ejercicio como lo indica
   if(queue_empty(alta_prioridad)== 0){ //la cola de prioridad alta no esta vacia 
-    while(queue_empty(alta_prioridad)==0){
-      // coge el de prioridad uno, 
-      TCB *p = dequeue(alta_prioridad);
-      if((*p).state == INIT){
-        current = (*p).tid;
-	      return p;
-      }
-    }
-  }else{ //pasamos a los de priodidad baja
-    printf("Planificador apartado 3.1.1\n");
-    //TCB *p = dequeue(baja_prioridad);
+    // coge el de prioridad uno
+    disable_interrupt();
+    disable_disk_interrupt();
+    TCB *p = dequeue(alta_prioridad);
+    enable_interrupt();
+    enable_disk_interrupt();
+	  return p;
+  
   }
-  printf("*** FINISH\n");
-  //printf("mythread_free: No thread in the system\nExiting...\n");	
-  exit(1); 
+
+  //pasamos a los de priodidad baja cuando ya no quedan en la de alta prioridad
+  if (queue_empty(baja_prioridad)==0){
+    disable_interrupt();
+    disable_disk_interrupt();
+    TCB* p = dequeue(baja_prioridad);
+    enable_interrupt();
+    enable_disk_interrupt();
+    return p;
+  }
+  if (en_ejecucion->state==INIT){
+    return en_ejecucion;
+  }
+
+  // REVISAR
+  if(queue_empty(espera_disco)){
+      printf("*** FINISH\n"); 
+      exit(1); 
+  }
+
+  return &idle;
 }
 
 
 /* Timer interrupt  */
 void timer_interrupt(int sig)
 {
-
+  if (en_ejecucion->priority == HIGH_PRIORITY){
+    return;
+  }
+  en_ejecucion->ticks = (en_ejecucion->ticks) - 1;
+  if (en_ejecucion->ticks <= 0){
+    TCB *siguiente = scheduler();
+    activator(siguiente);
+  }
 } 
 
 /* Activator */
-void activator(TCB* next){
-  //reliza el cambio de contexto y lo ejecuta 
-  printf("*** THREAD %d READY\n", next->tid);
-  setcontext (&(next->run_env));
-  printf("mythread_free: After setcontext, should never get here!!...\n");	
+void activator(TCB* siguiente){
+  en_ejecucion->ticks= QUANTUM_TICKS;
+  // se le ponen los ticks por defecto para optimizar el programa
+  if (en_ejecucion == siguiente){
+    // se devuelve NULL si el que esta en ejecucion es el que se ejecutara a continuacion
+    return;
+  }
+  TCB* anterior = en_ejecucion;
+  en_ejecucion = siguiente;
+  actual = en_ejecucion->tid;
+
+
+  if (anterior->state == FREE){
+    //solo se ejecuta cuando se produce un cambio de contexto
+    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", anterior->tid, en_ejecucion->tid);
+    setcontext (&(siguiente->run_env));
+  }
+
+  // REVISAR
+  if (anterior->state == WAITING){
+    if(en_ejecucion->state != IDLE)
+      printf("*** THREAD READY : SET CONTEXT TO %d\n", en_ejecucion->tid);
+    swapcontext(&anterior->run_env, &en_ejecucion->run_env);
+    return;
+  }
+
+  disable_interrupt();
+  disable_disk_interrupt();
+  if(anterior->state != IDLE)
+    enqueue(baja_prioridad, anterior);
+
+  enable_interrupt();
+  enable_disk_interrupt();
+
+  /*****Just check if the thread was ejected or he just finish her quantum */
+  /*If they was ejected*/
+  if(anterior->state ==IDLE){
+    printf("*** THREAD READY : SET CONTEXT TO %d\n", en_ejecucion->tid);
+  } else {
+    if (en_ejecucion->priority == HIGH_PRIORITY){
+      printf("*** THREAD %d PREEMTED: SET CONTEXT OF %d\n", anterior->tid, en_ejecucion->tid);
+    } else {
+      printf("*** SWAPCONTEXT FROM %d TO %d\n", anterior->tid,en_ejecucion->tid);
+    }
+    swapcontext(&anterior->run_env, &en_ejecucion->run_env);
+  }
 }
 
 
