@@ -159,17 +159,22 @@ int mythread_gettid(){
 
 /* RoundRobin separado en ticks de tiempo (rodajas)*/
 TCB* scheduler(){
- if (queue_empty(listos)==0){
+ // Comprueba si la cola está vacía
+ if (queue_empty(listos) == 0){
+  // Desactiva las interrupciones durante la manipulación de la cola de procesos
   disable_interrupt();
-  TCB* next = dequeue(listos);
+  // Asigna el próximo proceso listo 
+  TCB* siguiente = dequeue(listos);
   enable_interrupt();
-
-  return next;
+  // Reactiva las interupciones
+  return siguiente;
  }
+ // Comprueba si hay algún proceso en curso cuando la cola de procesos está vacía
  if (running->state==INIT){
   return running;
  }
 
+  // Procesos finalizados
   printf("*** FINISH\n"); 
   exit(1); 
 }
@@ -180,30 +185,37 @@ void timer_interrupt(int sig)
 {
   running->ticks = (running->ticks) - 1;
 
+  /* Lanza el scheduler y activator cuando no quedan ticks
+  restantes en la rodaja del proceso en curso */
   if (running->ticks <= 0){
-    TCB *next = scheduler();
-    activator(next);
+    TCB *siguiente = scheduler();
+    activator(siguiente);
   }
 } 
 
-/* Activator */
-void activator(TCB* next){
+/* Activator para realizar el cambio de contexto*/
+void activator(TCB* siguiente){
 
+  // Asigna los ticks que componen cada rodaja
   running->ticks= QUANTUM_TICKS;
-  TCB* previous_tcb = running;
-  running = next;
+  //Guarda el contexto del proceso saliente
+  TCB* tcb_anterior = running;
+  // Asigna el próximo proceso como el actual
+  running = siguiente;
   current = running->tid;
 
-  if (previous_tcb->state == FREE){
-    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", previous_tcb->tid, running->tid);
-    setcontext (&(next->run_env));
+  // Si un proceso finaliza y se libera, se asigna el contexto del nuevo proceso
+  if (tcb_anterior->state == FREE){
+    printf("*** THREAD %d TERMINATED: SET CONTEXT OF %d\n", tcb_anterior->tid, running->tid);
+    setcontext (&(siguiente->run_env));
   }
   disable_interrupt();
-  enqueue(listos, previous_tcb);
+  // Encola el proceso antiguo para reanudarlo en el futuro
+  enqueue(listos, tcb_anterior);
   enable_interrupt();
-
-  printf("*** SWAPCONTEXT FROM %d TO %d\n", previous_tcb->tid,running->tid);
-  swapcontext(&previous_tcb->run_env, &running->run_env);
+  // Realiza el cambio de contexto
+  printf("*** SWAPCONTEXT FROM %d TO %d\n", tcb_anterior->tid,running->tid);
+  swapcontext(&tcb_anterior->run_env, &running->run_env);
 }
 
 
