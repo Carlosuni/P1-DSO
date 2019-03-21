@@ -110,7 +110,7 @@ int mythread_create (void (*fun_addr)(),int priority)
 
   TCB *actual = &t_state[i];
 
-  if(priority==HIGH_PRIORITY){
+  if(priority==HIGH_PRIORITY){    
     if (queue_empty(alta_prioridad) == 1 && en_ejecucion->priority == LOW_PRIORITY){ /* o igual a 0¿?*/
       activator(actual);
     }else{
@@ -180,7 +180,10 @@ TCB* scheduler(){
     TCB *p = dequeue(alta_prioridad);
     enable_interrupt();
 	  return p;
-  }else{ //pasamos a los de priodidad baja cuando ya no quedan en la de alta prioridad
+  //}else{ //pasamos a los de priodidad baja cuando ya no quedan en la de alta prioridad
+  }
+
+  if (queue_empty(baja_prioridad)==0){
     disable_interrupt();
     TCB* p = dequeue(baja_prioridad);
     enable_interrupt();
@@ -189,6 +192,7 @@ TCB* scheduler(){
   if (en_ejecucion->state==INIT){
     return en_ejecucion;
   }
+  
   printf("*** FINISH\n");
   exit(1); 
 }
