@@ -190,9 +190,9 @@ TCB* scheduler(){
     enable_interrupt();
     return p;
   }
-  if (en_ejecucion->state==INIT){
-    return en_ejecucion;
-  }
+  //if (en_ejecucion->state==INIT){
+  //  return en_ejecucion;
+  //}
   
   printf("*** FINISH\n");
   exit(1); 

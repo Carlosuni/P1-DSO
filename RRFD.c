@@ -240,9 +240,9 @@ TCB* scheduler(){
     enable_disk_interrupt();
     return p;
   }
-  if (en_ejecucion->state==INIT){
-    return en_ejecucion;
-  }
+  //if (en_ejecucion->state==INIT){
+  //  return en_ejecucion;
+  //}
 
   if(queue_empty(espera_disco)){
       printf("*** FINISH\n"); 
